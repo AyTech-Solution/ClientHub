@@ -12,6 +12,13 @@ app.use(express.json({
   }
 }));
 
+// In-memory stats for Daily Summary
+let dailyStats = {
+  issuesOpened: 0,
+  issuesClosed: 0,
+  prsOpened: 0
+};
+
 const privateKey = fs.readFileSync(process.env.PRIVATE_KEY_PATH, 'utf8');
 
 // Webhook Validation
@@ -64,6 +71,23 @@ async function getInstallationToken(installationId, jwt) {
   return authData.token;
 }
 
+// FEATURE 3: Automated Daily Summary Event Route
+// Ise aap browser me http://localhost:3000/api/summary par dekh sakte hain
+app.get('/api/summary', (req, res) => {
+  const today = new Date().toLocaleDateString();
+  const summaryMarkdown = `
+# 📊 AyTech ClientHub - Daily Activity Summary
+**Date:** ${today}
+---
+- 📝 **New Issues Logged:** ${dailyStats.issuesOpened}
+- ✅ **Issues Closed/Resolved:** ${dailyStats.issuesClosed}
+- 🔀 **Pull Requests Open for Review:** ${dailyStats.prsOpened}
+---
+*Powered by AyTech Solution Automation Bot 🚀*
+  `;
+  res.send(summaryMarkdown);
+});
+
 app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
   const event = req.headers['x-github-event'];
   const payload = req.body;
@@ -86,13 +110,13 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
       const repoOwner = payload.repository.owner.login;
       const issueNumber = payload.issue.number;
       const userName = payload.issue.user.login;
+      const issueNodeId = payload.issue.node_id; // Needed for Project V2 (Kanban)
 
       if (action === 'opened') {
-        const issueTitle = (payload.issue.title || '').toLowerCase();
-        const issueBody = (payload.issue.body || '').toLowerCase();
+        dailyStats.issuesOpened++;
         console.log(`Processing New issue #${issueNumber}...`);
 
-        // FEATURE: First-Time Contributor Check
+        // First-Time Contributor Check
         let welcomeMessage = `Thanks for opening this issue, @${userName}! Powered by **AyTech Solution** 🚀`;
         if (payload.issue.author_association === 'FIRST_TIME_CONTRIBUTOR' || payload.issue.author_association === 'NONE') {
           welcomeMessage = `👋 Welcome @${userName} to our repository! This looks like one of your first interactions here. Thank you for opening this issue! Team **AyTech Solution** will look into this shortly. 🚀`;
@@ -122,8 +146,13 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
           body: JSON.stringify({ assignees: [repoOwner] })
         });
 
+        // FEATURE 1: Auto-Create Kanban Card Link Simulation log
+        console.log(`⚙️ [Kanban Automation]: Item ${issueNodeId} parsed and prepared for Project Board entry.`);
+
         // Auto Labeling Logic
         let labelsToAdd = [];
+        const issueTitle = (payload.issue.title || '').toLowerCase();
+        const issueBody = (payload.issue.body || '').toLowerCase();
         if (issueTitle.includes('bug') || issueTitle.includes('error') || issueTitle.includes('broken') || issueBody.includes('bug')) {
           labelsToAdd.push('bug');
         } else if (issueTitle.includes('feature') || issueTitle.includes('add') || issueBody.includes('feature')) {
@@ -145,6 +174,7 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
       }
 
       if (action === 'closed') {
+        dailyStats.issuesClosed++;
         await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/issues/${issueNumber}/comments`, {
           method: 'POST',
           headers: {
@@ -161,9 +191,10 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
     }
 
     // ====================================================
-    // HANDLE: PULL REQUESTS (Checklist + Secret Leak Scan)
+    // HANDLE: PULL REQUESTS
     // ====================================================
     if (event === 'pull_request' && payload.action === 'opened') {
+      dailyStats.prsOpened++;
       const repoName = payload.repository.name;
       const repoOwner = payload.repository.owner.login;
       const prNumber = payload.number;
@@ -174,11 +205,12 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
 
       let prChecklist = `Thanks for opening this Pull Request! Team **AyTech Solution** will review it soon. 🚀\n\n### 🛠️ Review Checklist Before Merge:\n- [ ] Code is properly formatted & clean.\n- [ ] Local build is passing without errors.\n- [ ] All environment variables are updated in .env.\n- [ ] Tested the changes locally.`;
 
-      // FEATURE: Secret/.env Leak Scanner
+      // Secret/.env Leak Scanner
       if (prTitle.includes('.env') || prBody.includes('secret') || prBody.includes('password') || prBody.includes('api_key')) {
         prChecklist += `\n\n⚠️ **SECURITY WARNING:** Our automated scanner detected keywords like '.env', 'secret', or 'password' in your PR metadata. Please double-check that you are **not** pushing hardcoded API keys or environment configuration files!`;
       }
 
+      // Send Checklist Comment
       await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/issues/${prNumber}/comments`, {
         method: 'POST',
         headers: {
@@ -189,11 +221,24 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
         },
         body: JSON.stringify({ body: prChecklist })
       });
-      console.log(`PR Response and Security Scan completed for PR #${prNumber}`);
+
+      // FEATURE 2: Auto-Request Reviewer (Assigning repo owner as default reviewer)
+      await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/pulls/${prNumber}/requested_reviewers`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'AyTech-ClientHub-App',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reviewers: [repoOwner] })
+      }).catch(err => console.log('Reviewer self-assignment skipped or user is owner.'));
+      
+      console.log(`PR Automation and Reviewer Request triggered for PR #${prNumber}`);
     }
 
   } catch (err) {
-    console.error('Error handling master webhook event:', err.message);
+    console.error('Error handling ultimate webhook event:', err.message);
   }
 
   res.status(200).send('Event received');
