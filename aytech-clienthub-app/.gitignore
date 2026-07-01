@@ -5,7 +5,7 @@ node_modules/
 .env
 *.pem
 *.key
-github-private-key.pem
+private-key.pem
 
 # Logs
 *.log
