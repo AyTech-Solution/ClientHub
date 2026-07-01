@@ -18,8 +18,8 @@ let dailyStats = {
   issuesClosed: 0,
   prsOpened: 0
 };
-
-const privateKey = fs.readFileSync(process.env.PRIVATE_KEY_PATH, 'utf8');
+let rawkey = process.env.PRIVATE_KEY_PATH;
+const finalKey = rawkey.replace(/\\n/g, '\n');
 
 // Webhook Validation
 function verifyGitHubWebhook(req, res, next) {
