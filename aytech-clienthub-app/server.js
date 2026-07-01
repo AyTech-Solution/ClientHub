@@ -70,7 +70,6 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
 
   console.log(`Received GitHub Event: ${event}`);
 
-  // Base variable check for API calls
   const installationId = payload.installation?.id;
   if (!installationId) return res.status(200).send('Event received but no installation found');
 
@@ -79,18 +78,25 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
     const token = await getInstallationToken(installationId, jwt);
 
     // ====================================================
-    // HANDLE: ISSUES EVENTS (Opened & Closed + Auto Assign)
+    // HANDLE: ISSUES EVENTS
     // ====================================================
     if (event === 'issues') {
       const action = payload.action;
       const repoName = payload.repository.name;
       const repoOwner = payload.repository.owner.login;
       const issueNumber = payload.issue.number;
+      const userName = payload.issue.user.login;
 
       if (action === 'opened') {
         const issueTitle = (payload.issue.title || '').toLowerCase();
         const issueBody = (payload.issue.body || '').toLowerCase();
         console.log(`Processing New issue #${issueNumber}...`);
+
+        // FEATURE: First-Time Contributor Check
+        let welcomeMessage = `Thanks for opening this issue, @${userName}! Powered by **AyTech Solution** 🚀`;
+        if (payload.issue.author_association === 'FIRST_TIME_CONTRIBUTOR' || payload.issue.author_association === 'NONE') {
+          welcomeMessage = `👋 Welcome @${userName} to our repository! This looks like one of your first interactions here. Thank you for opening this issue! Team **AyTech Solution** will look into this shortly. 🚀`;
+        }
 
         // 1. Welcome Comment post karein
         await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/issues/${issueNumber}/comments`, {
@@ -101,12 +107,10 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
             'User-Agent': 'AyTech-ClientHub-App',
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            body: `Thanks for opening this issue! Powered by **AyTech Solution** 🚀`
-          })
+          body: JSON.stringify({ body: welcomeMessage })
         });
 
-        // FEATURE 1: Auto Assign to Repo Owner (Aapko khud assign kar dega)
+        // Auto Assign to Repo Owner
         await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/issues/${issueNumber}/assignees`, {
           method: 'POST',
           headers: {
@@ -117,7 +121,6 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
           },
           body: JSON.stringify({ assignees: [repoOwner] })
         });
-        console.log(`Issue #${issueNumber} assigned to ${repoOwner}`);
 
         // Auto Labeling Logic
         let labelsToAdd = [];
@@ -154,21 +157,27 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
             body: `This issue has been successfully resolved and closed. Thank you for your contribution! If you face any further problems, feel free to reopen or create a new issue. Team **AyTech Solution** 🚀`
           })
         });
-        console.log('Closure comment posted successfully!');
       }
     }
 
     // ====================================================
-    // FEATURE 2: PULL REQUESTS EVENTS (Checklist Welcome)
+    // HANDLE: PULL REQUESTS (Checklist + Secret Leak Scan)
     // ====================================================
     if (event === 'pull_request' && payload.action === 'opened') {
       const repoName = payload.repository.name;
       const repoOwner = payload.repository.owner.login;
       const prNumber = payload.number;
+      const prTitle = (payload.pull_request.title || '').toLowerCase();
+      const prBody = (payload.pull_request.body || '').toLowerCase();
 
-      console.log(`Processing New Pull Request #${prNumber}...`);
+      console.log(`Scanning PR #${prNumber} for potential leaks & configurations...`);
 
-      const prChecklist = `Thanks for opening this Pull Request! Team **AyTech Solution** will review it soon. 🚀\n\n### 🛠️ Review Checklist Before Merge:\n- [ ] Code is properly formatted & clean.\n- [ ] Local build is passing without errors.\n- [ ] All environment variables are updated in .env.\n- [ ] Tested the changes locally.`;
+      let prChecklist = `Thanks for opening this Pull Request! Team **AyTech Solution** will review it soon. 🚀\n\n### 🛠️ Review Checklist Before Merge:\n- [ ] Code is properly formatted & clean.\n- [ ] Local build is passing without errors.\n- [ ] All environment variables are updated in .env.\n- [ ] Tested the changes locally.`;
+
+      // FEATURE: Secret/.env Leak Scanner
+      if (prTitle.includes('.env') || prBody.includes('secret') || prBody.includes('password') || prBody.includes('api_key')) {
+        prChecklist += `\n\n⚠️ **SECURITY WARNING:** Our automated scanner detected keywords like '.env', 'secret', or 'password' in your PR metadata. Please double-check that you are **not** pushing hardcoded API keys or environment configuration files!`;
+      }
 
       await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/issues/${prNumber}/comments`, {
         method: 'POST',
@@ -180,21 +189,11 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
         },
         body: JSON.stringify({ body: prChecklist })
       });
-      console.log(`PR Welcome checklist sent for PR #${prNumber}`);
-    }
-
-    // ====================================================
-    // FEATURE 3: REPOSITORY STAR EVENTS (Star Greet)
-    // ====================================================
-    if (event === 'star' && payload.action === 'created') {
-      const sender = payload.sender.login;
-      console.log(`🌟 Boom! Repository starred by user: ${sender}`);
-      // Star events handle karne ke liye usually system log ya analytics use hoti hai.
-      // Aap chahein toh backend level par tracks maintain kar sakte hain!
+      console.log(`PR Response and Security Scan completed for PR #${prNumber}`);
     }
 
   } catch (err) {
-    console.error('Error handling webhook event:', err.message);
+    console.error('Error handling master webhook event:', err.message);
   }
 
   res.status(200).send('Event received');
@@ -203,3 +202,4 @@ app.post('/webhook', verifyGitHubWebhook, async (req, res) => {
 app.listen(PORT, () => {
   console.log(`GitHub App backend is listening on port ${PORT}`);
 });
+EOF
