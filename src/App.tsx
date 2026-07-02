@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { auth } from './firebaseConfig';
+import { auth } from './firebaseConfig.ts';
 import { signInWithPopup, GithubAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
 
 const GITHUB_APP_SLUG = "aytech-clienthub"; // Yahan apne GitHub App ka slug daalna
